@@ -1,44 +1,77 @@
-// index.js
-// where your node app starts
-
-// init project
 require('dotenv').config();
-var express = require('express');
-var app = express();
+const express = require('express');
+const cors = require('cors');
+const dns = require('dns');
+const bodyParser = require('body-parser');
+const app = express();
+const urlParser = require('url');
 
-// enable CORS (https://en.wikipedia.org/wiki/Cross-origin_resource_sharing)
-// so that your API is remotely testable by FCC
-var cors = require('cors');
-app.use(cors({ optionsSuccessStatus: 200 })); // some legacy browsers choke on 204
+// Basic Configuration
+const port = process.env.PORT || 3000;
 
-// http://expressjs.com/en/starter/static-files.html
-app.use(express.static('public'));
+app.use(cors());
+app.use('/public', express.static(`${process.cwd()}/public`));
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(express.json());
 
-// http://expressjs.com/en/starter/basic-routing.html
 app.get('/', function (req, res) {
-  res.sendFile(__dirname + '/views/index.html');
+  res.sendFile(process.cwd() + '/views/index.html');
 });
 
-// your first API endpoint...
-app.get('/api/whoami', (req, res) => {
-  const ip = req.ip || req.connection.remoteAddress;
-  const language = req.headers['accept-language'];
-  const software = req.headers['user-agent'];
+// In-memory database
+let urlDatabase = [];
+let idCounter = 1;
 
-  res.json({
-    ipaddress: ip,
-    language: language,
-    software: software
-  });
+// ✅ POST a URL to shorten
+app.post('/api/shorturl', (req, res) => {
+  const originalUrl = req.body.url;
+
+  try {
+    const parsedUrl = new URL(originalUrl);
+    const hostname = parsedUrl.hostname;
+
+    dns.lookup(hostname, (err) => {
+      if (err) return res.json({ error: 'invalid url' });
+
+      // Check if the URL already exists
+      const existing = urlDatabase.find(entry => entry.original_url === originalUrl);
+      if (existing) {
+        return res.json({
+          original_url: existing.original_url,
+          short_url: existing.short_url
+        });
+      }
+
+      // Store new URL
+      const newEntry = {
+        original_url: originalUrl,
+        short_url: idCounter++
+      };
+      urlDatabase.push(newEntry);
+
+      res.json({
+        original_url: newEntry.original_url,
+        short_url: newEntry.short_url
+      });
+    });
+  } catch (err) {
+    return res.json({ error: 'invalid url' });
+  }
 });
 
-app.get('/api/whoami', function (req, res) {
-  res.json({ ipaddress : 'hello API' });
+// ✅ GET redirect from short URL
+app.get('/api/shorturl/:short_url', (req, res) => {
+  const shortUrl = parseInt(req.params.short_url);
+  const found = urlDatabase.find(entry => entry.short_url === shortUrl);
+
+  if (found) {
+    return res.redirect(found.original_url);
+  } else {
+    return res.status(404).json({ error: 'No short URL found' });
+  }
 });
 
-
-
-// listen for requests :)
-var listener = app.listen(process.env.PORT || 3000, function () {
-  console.log('Your app is listening on port ' + listener.address().port);
+// ✅ Start server
+app.listen(port, function () {
+  console.log(`Listening on port ${port}`);
 });
