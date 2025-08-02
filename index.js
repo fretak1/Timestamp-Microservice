@@ -1,38 +1,44 @@
+// index.js
+// where your node app starts
+
+// init project
 require('dotenv').config();
-const express = require('express');
-const multer = require('multer');
-const cors = require('cors');
-const path = require('path');
+var express = require('express');
+var app = express();
 
-const app = express();
-const upload = multer({ dest: 'uploads/' }); // files saved in 'uploads' folder
+// enable CORS (https://en.wikipedia.org/wiki/Cross-origin_resource_sharing)
+// so that your API is remotely testable by FCC
+var cors = require('cors');
+app.use(cors({ optionsSuccessStatus: 200 })); // some legacy browsers choke on 204
 
-app.use(cors());
-app.use('/public', express.static(path.join(__dirname, 'public')));
+// http://expressjs.com/en/starter/static-files.html
+app.use(express.static('public'));
 
-// Serve HTML page
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'index.html'));
+// http://expressjs.com/en/starter/basic-routing.html
+app.get('/', function (req, res) {
+  res.sendFile(__dirname + '/views/index.html');
 });
 
-// API endpoint to upload a file and return metadata
-app.post('/api/fileanalyse', upload.single('upfile'), (req, res) => {
-  console.log('File received:', req.file);
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-
-  const { originalname, mimetype, size } = req.file;
+// your first API endpoint...
+app.get('/api/whoami', (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const language = req.headers['accept-language'];
+  const software = req.headers['user-agent'];
 
   res.json({
-    name: originalname,
-    type: mimetype,
-    size: size
+    ipaddress: ip,
+    language: language,
+    software: software
   });
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`App is listening on port ${PORT}`);
+app.get('/api/whoami', function (req, res) {
+  res.json({ ipaddress : 'hello API' });
+});
+
+
+
+// listen for requests :)
+var listener = app.listen(process.env.PORT || 3000, function () {
+  console.log('Your app is listening on port ' + listener.address().port);
 });
