@@ -1,77 +1,114 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const dns = require('dns');
+const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 const app = express();
-const urlParser = require('url');
 
-// Basic Configuration
-const port = process.env.PORT || 3000;
-
+// Middleware
 app.use(cors());
-app.use('/public', express.static(`${process.cwd()}/public`));
+app.use(express.static('public'));
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(express.json());
+app.use(bodyParser.json());
 
-app.get('/', function (req, res) {
-  res.sendFile(process.cwd() + '/views/index.html');
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
 });
 
-// In-memory database
-let urlDatabase = [];
-let idCounter = 1;
+// User Schema
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true }
+});
+const User = mongoose.model('User', userSchema);
 
-// ✅ POST a URL to shorten
-app.post('/api/shorturl', (req, res) => {
-  const originalUrl = req.body.url;
+// Exercise Schema
+const exerciseSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  description: String,
+  duration: Number,
+  date: Date
+});
+const Exercise = mongoose.model('Exercise', exerciseSchema);
 
-  try {
-    const parsedUrl = new URL(originalUrl);
-    const hostname = parsedUrl.hostname;
+// Root
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/views/index.html');
+});
 
-    dns.lookup(hostname, (err) => {
-      if (err) return res.json({ error: 'invalid url' });
+// Create a new user
+app.post('/api/users', async (req, res) => {
+  const username = req.body.username;
+  const newUser = new User({ username });
+  const savedUser = await newUser.save();
+  res.json({ username: savedUser.username, _id: savedUser._id });
+});
 
-      // Check if the URL already exists
-      const existing = urlDatabase.find(entry => entry.original_url === originalUrl);
-      if (existing) {
-        return res.json({
-          original_url: existing.original_url,
-          short_url: existing.short_url
-        });
-      }
+// Get all users
+app.get('/api/users', async (req, res) => {
+  const users = await User.find({}, 'username _id');
+  res.json(users);
+});
 
-      // Store new URL
-      const newEntry = {
-        original_url: originalUrl,
-        short_url: idCounter++
-      };
-      urlDatabase.push(newEntry);
+// Add exercise to a user
+app.post('/api/users/:_id/exercises', async (req, res) => {
+  const { description, duration, date } = req.body;
+  const userId = req.params._id;
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
 
-      res.json({
-        original_url: newEntry.original_url,
-        short_url: newEntry.short_url
-      });
-    });
-  } catch (err) {
-    return res.json({ error: 'invalid url' });
+  const exercise = new Exercise({
+    userId: user._id,
+    description,
+    duration: parseInt(duration),
+    date: date ? new Date(date) : new Date()
+  });
+  const savedExercise = await exercise.save();
+
+  res.json({
+    _id: user._id,
+    username: user.username,
+    date: savedExercise.date.toDateString(),
+    duration: savedExercise.duration,
+    description: savedExercise.description
+  });
+});
+
+// Get logs
+app.get('/api/users/:_id/logs', async (req, res) => {
+  const { from, to, limit } = req.query;
+  const userId = req.params._id;
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const query = { userId: user._id };
+  if (from || to) {
+    query.date = {};
+    if (from) query.date.$gte = new Date(from);
+    if (to) query.date.$lte = new Date(to);
   }
-});
 
-// ✅ GET redirect from short URL
-app.get('/api/shorturl/:short_url', (req, res) => {
-  const shortUrl = parseInt(req.params.short_url);
-  const found = urlDatabase.find(entry => entry.short_url === shortUrl);
-
-  if (found) {
-    return res.redirect(found.original_url);
-  } else {
-    return res.status(404).json({ error: 'No short URL found' });
+  let exercisesQuery = Exercise.find(query).select('-_id description duration date');
+  if (limit) {
+    exercisesQuery = exercisesQuery.limit(parseInt(limit));
   }
+
+  const exercises = await exercisesQuery.exec();
+
+  res.json({
+    _id: user._id,
+    username: user.username,
+    count: exercises.length,
+    log: exercises.map(ex => ({
+      description: ex.description,
+      duration: ex.duration,
+      date: ex.date.toDateString()
+    }))
+  });
 });
 
-// ✅ Start server
-app.listen(port, function () {
-  console.log(`Listening on port ${port}`);
+// Start server
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log('Your app is listening on port ' + listener.address().port);
 });
